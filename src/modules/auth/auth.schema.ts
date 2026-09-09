@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const registerBodySchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(100),
-  email: z.email().trim().toLowerCase(),
+  email: z.string().trim().toLowerCase().pipe(z.email()),
   password: z
     .string()
     .min(8, "Password must be at least 8 characters")
@@ -10,7 +10,7 @@ export const registerBodySchema = z.object({
 });
 
 export const loginBodySchema = z.object({
-  email: z.email().trim().toLowerCase(),
+  email: z.string().trim().toLowerCase().pipe(z.email()),
   password: z.string().min(1, "Password is required")
 });
 

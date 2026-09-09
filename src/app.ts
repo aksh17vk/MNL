@@ -26,8 +26,7 @@ export async function buildApp() {
   const baseLogger: FastifyBaseLogger = logger;
 
   const app = Fastify({
-    loggerInstance: baseLogger,
-    disableRequestLogging: isTest
+    loggerInstance: baseLogger
   }).withTypeProvider<ZodTypeProvider>();
 
   // Zod drives both request validation and response serialization.
@@ -46,7 +45,9 @@ export async function buildApp() {
   });
 
   await app.register(rateLimit, {
-    max: 100,
+    // The suite drives hundreds of requests from one address; keep the plugin
+    // in the chain so its behaviour is still exercised, but do not throttle it.
+    max: isTest ? 100_000 : 100,
     timeWindow: "1 minute"
   });
 

@@ -32,6 +32,47 @@ services:
       timeout: 5s
       retries: 5
 
+  # One-shot: applies migrations, then exits. The API waits for it to succeed.
+  # It uses the build stage because that is where the Prisma CLI lives.
+  migrate:
+    build:
+      context: .
+      target: build
+    container_name: mnl-migrate
+    command: ["pnpm", "exec", "prisma", "migrate", "deploy"]
+    environment:
+      DATABASE_URL: postgresql://mnl_user:mnl_password@postgres:5432/mnl_db?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: runtime
+    container_name: mnl-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://mnl_user:mnl_password@postgres:5432/mnl_db?schema=public
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      # Override in production. Compose refuses to start without a value.
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (at least 32 characters)}
+      JWT_EXPIRES_IN: 7d
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
 volumes:
   mnl_postgres_data:
   mnl_redis_data:
