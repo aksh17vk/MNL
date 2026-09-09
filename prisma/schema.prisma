@@ -1,0 +1,457 @@
+// MNL — Multiagent Negotiation Layer
+// Phase 1 database schema. No AI logic here — this models the engineering
+// workflow that a future agent layer will drive.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum RepositoryProvider {
+  GITHUB
+  GITLAB
+  BITBUCKET
+  LOCAL
+}
+
+enum RepositoryStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+enum TaskStatus {
+  PENDING
+  PLANNING
+  IN_PROGRESS
+  WAITING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SubtaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AgentType {
+  BACKEND
+  FRONTEND
+  SECURITY
+  QA
+  DATABASE
+  DEVOPS
+  ARCHITECTURE
+  GENERAL
+}
+
+enum AgentStatus {
+  ACTIVE
+  INACTIVE
+  DISABLED
+}
+
+enum AgentRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum NegotiationStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  FAILED
+}
+
+enum ClaimType {
+  PROPOSAL
+  OBSERVATION
+  HYPOTHESIS
+  RISK
+  CONSTRAINT
+}
+
+enum ClaimStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  SUPERSEDED
+}
+
+enum EvidenceType {
+  CODE
+  TEST
+  RUNTIME
+  GIT
+  STATIC_ANALYSIS
+  DOCUMENTATION
+}
+
+enum ConflictType {
+  FILE_CONFLICT
+  APPROACH_CONFLICT
+  SECURITY_CONFLICT
+  ARCHITECTURE_CONFLICT
+  EVIDENCE_CONFLICT
+}
+
+enum ConflictStatus {
+  OPEN
+  RESOLVED
+  ESCALATED
+  DISMISSED
+}
+
+enum DecisionType {
+  ACCEPT_A
+  ACCEPT_B
+  HYBRID
+  REJECT_BOTH
+  ESCALATE_HUMAN
+}
+
+enum DecisionStatus {
+  PENDING
+  APPLIED
+  REVERTED
+}
+
+enum ExecutionStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum VerificationType {
+  TYPECHECK
+  LINT
+  UNIT_TEST
+  INTEGRATION_TEST
+  BUILD
+  SECURITY_SCAN
+}
+
+enum VerificationStatus {
+  PENDING
+  RUNNING
+  PASSED
+  FAILED
+  SKIPPED
+}
+
+// ---------------------------------------------------------------------------
+// Identity & ownership
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  projects     Project[]
+  createdTasks Task[]    @relation("TaskCreatedBy")
+
+  @@map("users")
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  userId      String        @map("user_id")
+  name        String
+  description String?
+  status      ProjectStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repositories Repository[]
+  tasks        Task[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+model Repository {
+  id            String             @id @default(uuid())
+  projectId     String             @map("project_id")
+  name          String
+  provider      RepositoryProvider
+  url           String
+  defaultBranch String             @default("main") @map("default_branch")
+  status        RepositoryStatus   @default(CONNECTED)
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks   Task[]
+
+  @@index([projectId])
+  @@map("repositories")
+}
+
+// ---------------------------------------------------------------------------
+// Work items
+// ---------------------------------------------------------------------------
+
+model Task {
+  id           String       @id @default(uuid())
+  projectId    String       @map("project_id")
+  repositoryId String?      @map("repository_id")
+  title        String
+  description  String?
+  status       TaskStatus   @default(PENDING)
+  priority     TaskPriority @default(MEDIUM)
+  createdBy    String       @map("created_by")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository Repository? @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
+  creator    User        @relation("TaskCreatedBy", fields: [createdBy], references: [id])
+
+  subtasks     Subtask[]
+  agentRuns    AgentRun[]
+  negotiations Negotiation[]
+  decisions    Decision[]
+  executions   Execution[]
+
+  @@index([projectId])
+  @@index([repositoryId])
+  @@index([createdBy])
+  @@index([status])
+  @@map("tasks")
+}
+
+model Subtask {
+  id              String        @id @default(uuid())
+  taskId          String        @map("task_id")
+  title           String
+  description     String?
+  status          SubtaskStatus @default(PENDING)
+  assignedAgentId String?       @map("assigned_agent_id")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  task          Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  assignedAgent Agent?     @relation(fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  agentRuns     AgentRun[]
+
+  @@index([taskId])
+  @@index([assignedAgentId])
+  @@map("subtasks")
+}
+
+// ---------------------------------------------------------------------------
+// Agent registry (metadata only — no AI runtime in Phase 1)
+// ---------------------------------------------------------------------------
+
+model Agent {
+  id           String      @id @default(uuid())
+  name         String      @unique
+  type         AgentType
+  description  String?
+  status       AgentStatus @default(ACTIVE)
+  capabilities String[]    @default([])
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  agentRuns        AgentRun[]
+  assignedSubtasks Subtask[]
+
+  @@map("agents")
+}
+
+model AgentRun {
+  id          String         @id @default(uuid())
+  taskId      String         @map("task_id")
+  subtaskId   String?        @map("subtask_id")
+  agentId     String         @map("agent_id")
+  status      AgentRunStatus @default(PENDING)
+  startedAt   DateTime?      @map("started_at")
+  completedAt DateTime?      @map("completed_at")
+  error       String?
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  task    Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  subtask Subtask? @relation(fields: [subtaskId], references: [id], onDelete: SetNull)
+  agent   Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  claims  Claim[]
+
+  @@index([taskId])
+  @@index([subtaskId])
+  @@index([agentId])
+  @@map("agent_runs")
+}
+
+// ---------------------------------------------------------------------------
+// Negotiation
+// ---------------------------------------------------------------------------
+
+model Negotiation {
+  id          String            @id @default(uuid())
+  taskId      String            @map("task_id")
+  status      NegotiationStatus @default(PENDING)
+  startedAt   DateTime?         @map("started_at")
+  completedAt DateTime?         @map("completed_at")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  task      Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  claims    Claim[]
+  conflicts Conflict[]
+  decisions Decision[]
+
+  @@index([taskId])
+  @@map("negotiations")
+}
+
+model Claim {
+  id            String      @id @default(uuid())
+  negotiationId String      @map("negotiation_id")
+  agentRunId    String?     @map("agent_run_id")
+  content       String
+  type          ClaimType   @default(PROPOSAL)
+  status        ClaimStatus @default(PENDING)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  negotiation Negotiation @relation(fields: [negotiationId], references: [id], onDelete: Cascade)
+  agentRun    AgentRun?   @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+  evidence    Evidence[]
+
+  conflictsAsA Conflict[] @relation("ConflictClaimA")
+  conflictsAsB Conflict[] @relation("ConflictClaimB")
+
+  @@index([negotiationId])
+  @@index([agentRunId])
+  @@map("claims")
+}
+
+model Evidence {
+  id          String       @id @default(uuid())
+  claimId     String       @map("claim_id")
+  type        EvidenceType
+  source      String
+  content     String
+  location    String?
+  reliability Float        @default(0.5)
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([claimId])
+  @@map("evidence")
+}
+
+model Conflict {
+  id            String         @id @default(uuid())
+  negotiationId String         @map("negotiation_id")
+  claimAId      String         @map("claim_a_id")
+  claimBId      String         @map("claim_b_id")
+  type          ConflictType
+  status        ConflictStatus @default(OPEN)
+  description   String?
+  createdAt     DateTime       @default(now()) @map("created_at")
+  resolvedAt    DateTime?      @map("resolved_at")
+
+  negotiation Negotiation @relation(fields: [negotiationId], references: [id], onDelete: Cascade)
+  claimA      Claim       @relation("ConflictClaimA", fields: [claimAId], references: [id], onDelete: Cascade)
+  claimB      Claim       @relation("ConflictClaimB", fields: [claimBId], references: [id], onDelete: Cascade)
+
+  @@index([negotiationId])
+  @@index([claimAId])
+  @@index([claimBId])
+  @@map("conflicts")
+}
+
+model Decision {
+  id            String         @id @default(uuid())
+  taskId        String         @map("task_id")
+  negotiationId String?        @map("negotiation_id")
+  type          DecisionType
+  reason        String?
+  status        DecisionStatus @default(PENDING)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  task        Task         @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  negotiation Negotiation? @relation(fields: [negotiationId], references: [id], onDelete: SetNull)
+  executions  Execution[]
+
+  @@index([taskId])
+  @@index([negotiationId])
+  @@map("decisions")
+}
+
+// ---------------------------------------------------------------------------
+// Execution & verification (records only — no sandbox in Phase 1)
+// ---------------------------------------------------------------------------
+
+model Execution {
+  id          String          @id @default(uuid())
+  taskId      String          @map("task_id")
+  decisionId  String?         @map("decision_id")
+  status      ExecutionStatus @default(PENDING)
+  environment String?
+  startedAt   DateTime?       @map("started_at")
+  completedAt DateTime?       @map("completed_at")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  task          Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  decision      Decision?      @relation(fields: [decisionId], references: [id], onDelete: SetNull)
+  verifications Verification[]
+
+  @@index([taskId])
+  @@index([decisionId])
+  @@map("executions")
+}
+
+model Verification {
+  id          String             @id @default(uuid())
+  executionId String             @map("execution_id")
+  type        VerificationType
+  status      VerificationStatus @default(PENDING)
+  output      String?
+  startedAt   DateTime?          @map("started_at")
+  completedAt DateTime?          @map("completed_at")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  execution Execution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId])
+  @@map("verifications")
+}

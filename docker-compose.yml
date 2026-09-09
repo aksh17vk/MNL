@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mnl-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mnl_user
+      POSTGRES_PASSWORD: mnl_password
+      POSTGRES_DB: mnl_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - mnl_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mnl_user -d mnl_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: mnl-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - mnl_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mnl_postgres_data:
+  mnl_redis_data:
