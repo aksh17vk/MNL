@@ -1,12 +1,13 @@
 import { prisma } from "../../database/prisma.js";
 import type { AgentRun, Prisma } from "../../generated/prisma/client.js";
 import { BadRequestError, NotFoundError } from "../../lib/errors.js";
+import { emitEvent } from "../../lib/events.js";
 import {
   buildMeta,
   type PaginationMeta,
   toSkipTake
 } from "../../lib/pagination.js";
-import { assertTaskAccess } from "../tasks/tasks.service.js";
+import { assertTaskAccess, taskScope } from "../tasks/tasks.service.js";
 import { getAgentOrThrow } from "./agents.service.js";
 import type {
   AgentRunDto,
@@ -142,6 +143,23 @@ export async function updateAgentRun(
   }
 
   const run = await prisma.agentRun.update({ where: { id: runId }, data });
+  const dto = toAgentRunDto(run);
 
-  return toAgentRunDto(run);
+  if (input.status === "RUNNING") {
+    emitEvent("agent.started", {
+      ...(await taskScope(run.taskId)),
+      agentRun: dto
+    });
+  } else if (
+    input.status === "COMPLETED" ||
+    input.status === "FAILED" ||
+    input.status === "CANCELLED"
+  ) {
+    emitEvent("agent.completed", {
+      ...(await taskScope(run.taskId)),
+      agentRun: dto
+    });
+  }
+
+  return dto;
 }

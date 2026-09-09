@@ -1,6 +1,7 @@
 import { prisma } from "../../database/prisma.js";
 import type { Prisma, Subtask, Task } from "../../generated/prisma/client.js";
 import { BadRequestError, NotFoundError } from "../../lib/errors.js";
+import { emitEvent } from "../../lib/events.js";
 import {
   buildMeta,
   type PaginationMeta,
@@ -44,6 +45,18 @@ export function toSubtaskDto(subtask: Subtask): SubtaskDto {
     createdAt: subtask.createdAt.toISOString(),
     updatedAt: subtask.updatedAt.toISOString()
   };
+}
+
+/** Routing hints for a domain event about this task. */
+export async function taskScope(
+  taskId: string
+): Promise<{ taskId: string; projectId?: string }> {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { projectId: true }
+  });
+
+  return task ? { taskId, projectId: task.projectId } : { taskId };
 }
 
 /** A task is reachable only through a project the user owns. */
@@ -102,7 +115,10 @@ export async function createTask(
     }
   });
 
-  return toTaskDto(task);
+  const dto = toTaskDto(task);
+  emitEvent("task.created", { projectId, taskId: task.id, task: dto });
+
+  return dto;
 }
 
 export async function listTasks(
@@ -161,7 +177,14 @@ export async function updateTask(
     }
   });
 
-  return toTaskDto(task);
+  const dto = toTaskDto(task);
+  emitEvent("task.updated", {
+    projectId: task.projectId,
+    taskId: task.id,
+    task: dto
+  });
+
+  return dto;
 }
 
 export async function deleteTask(taskId: string, userId: string): Promise<void> {

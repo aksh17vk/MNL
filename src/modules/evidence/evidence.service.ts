@@ -1,6 +1,7 @@
 import { prisma } from "../../database/prisma.js";
 import type { Evidence, Prisma } from "../../generated/prisma/client.js";
 import { NotFoundError } from "../../lib/errors.js";
+import { emitEvent } from "../../lib/events.js";
 import {
   buildMeta,
   type PaginationMeta,
@@ -10,6 +11,7 @@ import {
   assertClaimAccess,
   assertNegotiationAccess
 } from "../negotiations/negotiations.service.js";
+import { taskScope } from "../tasks/tasks.service.js";
 import type {
   CreateEvidenceBody,
   EvidenceDto,
@@ -34,7 +36,7 @@ export async function createEvidence(
   userId: string,
   input: CreateEvidenceBody
 ): Promise<EvidenceDto> {
-  await assertClaimAccess(claimId, userId);
+  const claim = await assertClaimAccess(claimId, userId);
 
   const evidence = await prisma.evidence.create({
     data: {
@@ -47,7 +49,20 @@ export async function createEvidence(
     }
   });
 
-  return toEvidenceDto(evidence);
+  const dto = toEvidenceDto(evidence);
+  const negotiation = await prisma.negotiation.findUnique({
+    where: { id: claim.negotiationId },
+    select: { taskId: true }
+  });
+
+  if (negotiation) {
+    emitEvent("evidence.added", {
+      ...(await taskScope(negotiation.taskId)),
+      evidence: dto
+    });
+  }
+
+  return dto;
 }
 
 export async function listClaimEvidence(

@@ -1,12 +1,13 @@
 import { prisma } from "../../database/prisma.js";
 import type { Claim, Negotiation, Prisma } from "../../generated/prisma/client.js";
 import { BadRequestError, NotFoundError } from "../../lib/errors.js";
+import { emitEvent } from "../../lib/events.js";
 import {
   buildMeta,
   type PaginationMeta,
   toSkipTake
 } from "../../lib/pagination.js";
-import { assertTaskAccess } from "../tasks/tasks.service.js";
+import { assertTaskAccess, taskScope } from "../tasks/tasks.service.js";
 import type {
   ClaimDto,
   CreateClaimBody,
@@ -145,8 +146,21 @@ export async function updateNegotiation(
     where: { id: negotiationId },
     data
   });
+  const dto = toNegotiationDto(negotiation);
 
-  return toNegotiationDto(negotiation);
+  if (input.status === "ACTIVE") {
+    emitEvent("negotiation.started", {
+      ...(await taskScope(negotiation.taskId)),
+      negotiation: dto
+    });
+  } else if (input.status === "COMPLETED" || input.status === "FAILED") {
+    emitEvent("negotiation.completed", {
+      ...(await taskScope(negotiation.taskId)),
+      negotiation: dto
+    });
+  }
+
+  return dto;
 }
 
 // --- claims -----------------------------------------------------------------
@@ -156,7 +170,7 @@ export async function createClaim(
   userId: string,
   input: CreateClaimBody
 ): Promise<ClaimDto> {
-  await assertNegotiationAccess(negotiationId, userId);
+  const negotiation = await assertNegotiationAccess(negotiationId, userId);
 
   if (input.agentRunId) {
     const run = await prisma.agentRun.findFirst({
@@ -178,7 +192,13 @@ export async function createClaim(
     }
   });
 
-  return toClaimDto(claim);
+  const dto = toClaimDto(claim);
+  emitEvent("claim.created", {
+    ...(await taskScope(negotiation.taskId)),
+    claim: dto
+  });
+
+  return dto;
 }
 
 export async function listClaims(

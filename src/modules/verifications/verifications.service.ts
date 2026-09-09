@@ -1,12 +1,14 @@
 import { prisma } from "../../database/prisma.js";
 import type { Prisma, Verification } from "../../generated/prisma/client.js";
 import { NotFoundError } from "../../lib/errors.js";
+import { emitEvent } from "../../lib/events.js";
 import {
   buildMeta,
   type PaginationMeta,
   toSkipTake
 } from "../../lib/pagination.js";
 import { assertExecutionAccess } from "../executions/executions.service.js";
+import { taskScope } from "../tasks/tasks.service.js";
 import type {
   CreateVerificationBody,
   ListVerificationsQuery,
@@ -135,6 +137,25 @@ export async function updateVerification(
     where: { id: verificationId },
     data
   });
+  const dto = toVerificationDto(verification);
 
-  return toVerificationDto(verification);
+  if (
+    input.status === "PASSED" ||
+    input.status === "FAILED" ||
+    input.status === "SKIPPED"
+  ) {
+    const execution = await prisma.execution.findUnique({
+      where: { id: verification.executionId },
+      select: { taskId: true }
+    });
+
+    if (execution) {
+      emitEvent("verification.completed", {
+        ...(await taskScope(execution.taskId)),
+        verification: dto
+      });
+    }
+  }
+
+  return dto;
 }

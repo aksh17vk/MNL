@@ -17,6 +17,7 @@ import { logger } from "./lib/logger.js";
 import { success } from "./lib/response.js";
 import authPlugin from "./middleware/auth.middleware.js";
 import { registerErrorHandler } from "./middleware/error.middleware.js";
+import socketPlugin from "./realtime/socket.js";
 import { apiRoutes } from "./routes/index.js";
 
 export async function buildApp() {
@@ -76,6 +77,9 @@ export async function buildApp() {
   });
 
   await app.register(authPlugin);
+
+  // Must come after the JWT plugin — the socket handshake verifies the token.
+  await app.register(socketPlugin);
 
   app.get(
     "/health",

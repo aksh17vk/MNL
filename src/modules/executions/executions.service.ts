@@ -1,12 +1,13 @@
 import { prisma } from "../../database/prisma.js";
 import type { Execution, Prisma } from "../../generated/prisma/client.js";
 import { BadRequestError, NotFoundError } from "../../lib/errors.js";
+import { emitEvent } from "../../lib/events.js";
 import {
   buildMeta,
   type PaginationMeta,
   toSkipTake
 } from "../../lib/pagination.js";
-import { assertTaskAccess } from "../tasks/tasks.service.js";
+import { assertTaskAccess, taskScope } from "../tasks/tasks.service.js";
 import type {
   CreateExecutionBody,
   ExecutionDto,
@@ -148,6 +149,23 @@ export async function updateExecution(
     where: { id: executionId },
     data
   });
+  const dto = toExecutionDto(execution);
 
-  return toExecutionDto(execution);
+  if (input.status === "RUNNING") {
+    emitEvent("execution.started", {
+      ...(await taskScope(execution.taskId)),
+      execution: dto
+    });
+  } else if (
+    input.status === "COMPLETED" ||
+    input.status === "FAILED" ||
+    input.status === "CANCELLED"
+  ) {
+    emitEvent("execution.completed", {
+      ...(await taskScope(execution.taskId)),
+      execution: dto
+    });
+  }
+
+  return dto;
 }

@@ -1,12 +1,14 @@
 import { prisma } from "../../database/prisma.js";
 import type { Conflict, Prisma } from "../../generated/prisma/client.js";
 import { BadRequestError, NotFoundError } from "../../lib/errors.js";
+import { emitEvent } from "../../lib/events.js";
 import {
   buildMeta,
   type PaginationMeta,
   toSkipTake
 } from "../../lib/pagination.js";
 import { assertNegotiationAccess } from "../negotiations/negotiations.service.js";
+import { taskScope } from "../tasks/tasks.service.js";
 import type {
   ConflictDto,
   CreateConflictBody,
@@ -48,7 +50,7 @@ export async function createConflict(
   userId: string,
   input: CreateConflictBody
 ): Promise<ConflictDto> {
-  await assertNegotiationAccess(negotiationId, userId);
+  const negotiation = await assertNegotiationAccess(negotiationId, userId);
 
   // Both claims must belong to the negotiation the conflict is filed under.
   const claims = await prisma.claim.findMany({
@@ -73,7 +75,13 @@ export async function createConflict(
     }
   });
 
-  return toConflictDto(conflict);
+  const dto = toConflictDto(conflict);
+  emitEvent("conflict.detected", {
+    ...(await taskScope(negotiation.taskId)),
+    conflict: dto
+  });
+
+  return dto;
 }
 
 export async function listConflicts(
@@ -114,7 +122,7 @@ export async function updateConflict(
   userId: string,
   input: UpdateConflictBody
 ): Promise<ConflictDto> {
-  await assertConflictAccess(conflictId, userId);
+  const existing = await assertConflictAccess(conflictId, userId);
 
   const data: Prisma.ConflictUpdateInput = {
     ...(input.type !== undefined ? { type: input.type } : {}),
@@ -132,6 +140,21 @@ export async function updateConflict(
     where: { id: conflictId },
     data
   });
+  const dto = toConflictDto(conflict);
 
-  return toConflictDto(conflict);
+  if (input.status !== undefined && input.status !== "OPEN") {
+    const negotiation = await prisma.negotiation.findUnique({
+      where: { id: existing.negotiationId },
+      select: { taskId: true }
+    });
+
+    if (negotiation) {
+      emitEvent("conflict.resolved", {
+        ...(await taskScope(negotiation.taskId)),
+        conflict: dto
+      });
+    }
+  }
+
+  return dto;
 }

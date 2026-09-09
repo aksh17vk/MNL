@@ -1,13 +1,14 @@
 import { prisma } from "../../database/prisma.js";
 import type { Decision, Prisma } from "../../generated/prisma/client.js";
 import { NotFoundError } from "../../lib/errors.js";
+import { emitEvent } from "../../lib/events.js";
 import {
   buildMeta,
   type PaginationMeta,
   toSkipTake
 } from "../../lib/pagination.js";
 import { assertNegotiationAccess } from "../negotiations/negotiations.service.js";
-import { assertTaskAccess } from "../tasks/tasks.service.js";
+import { assertTaskAccess, taskScope } from "../tasks/tasks.service.js";
 import type {
   CreateDecisionBody,
   DecisionDto,
@@ -60,7 +61,13 @@ export async function createNegotiationDecision(
     }
   });
 
-  return toDecisionDto(decision);
+  const dto = toDecisionDto(decision);
+  emitEvent("decision.created", {
+    ...(await taskScope(negotiation.taskId)),
+    decision: dto
+  });
+
+  return dto;
 }
 
 /** Filed straight against a task, with no negotiation behind it. */
@@ -79,7 +86,10 @@ export async function createTaskDecision(
     }
   });
 
-  return toDecisionDto(decision);
+  const dto = toDecisionDto(decision);
+  emitEvent("decision.created", { ...(await taskScope(taskId)), decision: dto });
+
+  return dto;
 }
 
 export async function listNegotiationDecisions(
